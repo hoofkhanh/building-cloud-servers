@@ -1,71 +1,57 @@
-#!/bin/bash
-set -e
 
-PROJECT_ID="building-servers"
+#!/bin/bash
+set -Eeuo pipefail
+
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION="us-central1"
 
-echo "=================================="
-echo "Cleaning up billable resources"
-echo "=================================="
+if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "(unset)" ]]; then
+    echo "No GCP project selected."
+    exit 1
+fi
 
-# 1. Delete Cloud NAT
-echo "Deleting Cloud NAT..."
+echo "Deleting billable resources in: $PROJECT_ID"
 
+read -r -p "Type DELETE to continue: " CONFIRM
+[[ "$CONFIRM" == "DELETE" ]] || exit 1
+
+# Delete Compute Engine VMs
+for ITEM in \
+    "bastion-server:us-central1-a" \
+    "proxy-server:us-central1-a" \
+    "backend-1-server:us-central1-b" \
+    "backend-2-server:us-central1-a"
+do
+    VM="${ITEM%%:*}"
+    ZONE="${ITEM##*:}"
+
+    gcloud compute instances delete "$VM" \
+        --zone="$ZONE" \
+        --project="$PROJECT_ID" \
+        --quiet || true
+done
+
+# Delete Cloud NAT
 gcloud compute routers nats delete nat-config \
     --router=nat-router \
     --router-region="$REGION" \
     --project="$PROJECT_ID" \
     --quiet || true
 
-# 2. Delete Cloud Router
-echo "Deleting Cloud Router..."
-
 gcloud compute routers delete nat-router \
     --region="$REGION" \
     --project="$PROJECT_ID" \
     --quiet || true
 
-# 3. Delete Bastion VM and attached disks
-echo "Deleting Bastion VM..."
-
-gcloud compute instances delete bastion-server \
-    --zone=us-central1-a \
-    --project="$PROJECT_ID" \
-    --delete-disks=all \
-    --quiet || true
-
-# 4. Delete Proxy VM and attached disks
-echo "Deleting Proxy VM..."
-
-gcloud compute instances delete proxy-server \
-    --zone=us-central1-a \
-    --project="$PROJECT_ID" \
-    --delete-disks=all \
-    --quiet || true
-
-# 5. Delete Backend VM (if it exists)
-echo "Deleting Backend VM..."
-
-gcloud compute instances delete backend-1-server \
-    --zone=us-central1-b \
-    --project="$PROJECT_ID" \
-    --delete-disks=all \
-    --quiet || true
-
-# 6. Delete Artifact Registry repository
-echo "Deleting Artifact Registry..."
-
+# Delete Artifact Registry
 gcloud artifacts repositories delete my-repo \
     --location="$REGION" \
     --project="$PROJECT_ID" \
     --quiet || true
 
-# 7. Delete Cloud Build source bucket
-echo "Deleting Cloud Storage bucket..."
-
+# Delete Cloud Storage bucket and contents
 gcloud storage rm --recursive \
-    "gs://${PROJECT_ID}-build-source" || true
+    "gs://${PROJECT_ID}-build-source" \
+    --quiet || true
 
-echo "=================================="
-echo "Cleanup commands completed!"
-echo "=================================="
+echo "Cleanup completed."
