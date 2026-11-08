@@ -23,3 +23,6 @@ Err:2 http://security.ubuntu.com/ubuntu noble-updates/main amd64 nginx amd64 1.2
 E: Failed to fetch http://security.ubuntu.com/ubuntu/pool/main/n/nginx/nginx-common_1.24.0-2ubuntu7.19_all.deb  Cannot initiate the connection to us-central1.gce.archive.ubuntu.com:80 (2600:1901:0:568a::). - connect (101: Network is unreachable) Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.184.34.241), connection timed out Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.184.213.5), connection timed out Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.202.116.96), connection timed out Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.224.11.34), connection timed out Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.193.225.125), connection timed out Could not connect to us-central1.gce.archive.ubuntu.com:80 (35.184.25.42), connection timed out
 E: Failed to fetch http://security.ubuntu.com/ubuntu/pool/main/n/nginx/nginx_1.24.0-2ubuntu7.19_amd64.deb  Cannot initiate the connection to us-central1.gce.archive.ubuntu.com:80 (2600:1901:0:568a::). - connect (101: Network is unreachable)
 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+
+4. When i need to automate installation in many vms, using Ansible to prevent 
+repeated configurations manually
