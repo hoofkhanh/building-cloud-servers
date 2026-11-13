@@ -23,39 +23,33 @@ func main() {
 	dsn := os.Getenv("DATABASE_URL")
 
 	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:5432/taskdb?sslmode=disable"
+		dsn = "postgres://postgres:postgres@postgres:5432/taskdb?sslmode=disable"
 	}
 
 	var err error
 	db, err = pgxpool.New(context.Background(), dsn)
 	if err != nil {
-		log.Printf("Database configuration error: %v", err)
-		db = nil
+		log.Fatalf("Failed to create database pool: %v", err)
 	}
 
-	if db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		if err := db.Ping(ctx); err != nil {
-			log.Printf("Database unavailable: %v", err)
-			db.Close()
-			db = nil
-		} else {
-			log.Println("Connected to PostgreSQL")
+	if err := db.Ping(ctx); err != nil {
+		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
+	}
 
-			_, err = db.Exec(ctx,
-				`CREATE TABLE IF NOT EXISTS tasks (
-                    id BIGSERIAL PRIMARY KEY,
-                    title TEXT NOT NULL
-                )`)
+	log.Println("Connected to PostgreSQL")
 
-			if err != nil {
-				log.Printf("Could not initialize database: %v", err)
-				db.Close()
-				db = nil
-			}
-		}
+	_, err = db.Exec(ctx, `
+        CREATE TABLE IF NOT EXISTS tasks (
+            id BIGSERIAL PRIMARY KEY,
+            title TEXT NOT NULL
+        )
+    `)
+
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
 	http.HandleFunc("GET /tasks", getTasks)

@@ -26,3 +26,20 @@ E: Unable to fetch some archives, maybe run apt-get update or try with --fix-mis
 
 4. When i need to automate installation in many vms, using Ansible to prevent 
 repeated configurations manually
+
+### 5. Linux Firewall – iptables with Docker
+
+- **Purpose:** Enhance GCP Firewall by using Linux iptables to control network traffic directly inside the server, providing an additional layer of security for container-to-container traffic that GCP Firewall cannot filter at the container level.
+
+- **Problem:** DOCKER-USER rules did not match traffic between containers sharing the same Docker bridge network. Both `app` and `app_test` could access `postgres:5432`, even though a DROP rule was configured.
+
+- **Cause:** Traffic between containers on the same Linux bridge can be forwarded at Layer 2, bypassing the IPv4 iptables FORWARD chain and DOCKER-USER when bridge netfilter is not enabled.
+
+- **Solution – Why?** Enable `br_netfilter` and set `bridge-nf-call-iptables=1` to make bridged IPv4 traffic pass through iptables hooks, allowing DOCKER-USER to inspect and filter the traffic.
+
+**Commands:**
+
+```bash
+sudo modprobe br_netfilter
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
+```
