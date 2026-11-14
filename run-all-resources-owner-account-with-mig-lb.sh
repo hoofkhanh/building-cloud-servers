@@ -369,66 +369,64 @@ if ! gcloud iam service-accounts describe $BACKEND_VM_SA@$PROJECT_ID.iam.gservic
 fi
 
 
-# echo "======================================="
-# echo "Create a firewall rule for Backend vms (bastion connects to backends)"
-# echo "======================================="
-# if ! gcloud compute firewall-rules describe $BACKEND_FW_SSH_NAME \
-#     --project=$PROJECT_ID >/dev/null 2>&1; then
-#     gcloud compute firewall-rules create $BACKEND_FW_SSH_NAME \
-#         --network=$NETWORK_NAME \
-#         --direction=INGRESS \
-#         --action=ALLOW \
-#         --rules=tcp:22 \
-#         --source-tags=$BASTION_VM_TAG \
-#         --target-tags=$BACKEND_VM_TAG \
-#         --project=$PROJECT_ID
-# fi
+echo "======================================="
+echo "Create a firewall rule for Backend vms (bastion connects to backends)"
+echo "======================================="
+if ! gcloud compute firewall-rules describe $BACKEND_FW_SSH_NAME \
+    --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $BACKEND_FW_SSH_NAME \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:22 \
+        --source-tags=$BASTION_VM_TAG \
+        --target-tags=$BACKEND_VM_TAG \
+        --project=$PROJECT_ID
+fi
 
-# echo "======================================="
-# echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Backend VMs"
-# echo "======================================="
+echo "======================================="
+echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Backend VMs"
+echo "======================================="
 
-# gcloud compute instances add-iam-policy-binding $BACKEND_VM_NAME \
-#   --zone=$BACKEND_VM_ZONE \
-#   --project="$PROJECT_ID" \
-#   --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-#   --role="projects/$PROJECT_ID/roles/computeVMAccess" >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="projects/$PROJECT_ID/roles/computeVMAccess" \
+  --condition='expression=resource.type == "compute.googleapis.com/Instance" && resource.name.extract("/instances/{name}").startsWith("app-mig-"),title=backend-mig-only,description=Allow Bastion access only to backend MIG instances'
 
-# gcloud iam service-accounts add-iam-policy-binding "$BACKEND_1_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-#     --project="$PROJECT_ID" \
-#     --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-#     --role="roles/iam.serviceAccountUser" >/dev/null
+gcloud iam service-accounts add-iam-policy-binding "$BACKEND_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountUser" >/dev/null
 
-# gcloud compute instances add-iam-policy-binding $BACKEND_1_VM_NAME \
-#   --zone=$BACKEND_1_VM_ZONE \
-#   --project="$PROJECT_ID" \
-#   --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-#   --role="roles/compute.osAdminLogin" >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:bastion-vm-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/compute.osAdminLogin" \
+  --condition='expression=(resource.type == "compute.googleapis.com/Instance" && resource.name.extract("/instances/{name}").startsWith("app-mig-")),title=backend-mig-only,description=Allow OS Admin Login only to backend MIG instances'
 
-# echo "======================================="
-# echo "Granting permissions to the Backend 1 VM's service account to allow it to pull images from Artifact Registry"
-# echo "======================================="
-# gcloud artifacts repositories add-iam-policy-binding $ARTIFACT_REPO \
-#     --project=$PROJECT_ID \
-#     --location=$REGION \
-#     --member="serviceAccount:${BACKEND_1_VM_SA}@$PROJECT_ID.iam.gserviceaccount.com" \
-#     --role="roles/artifactregistry.reader" >/dev/null
+echo "======================================="
+echo "Granting permissions to the Backend VMs' service account to allow it to pull images from Artifact Registry"
+echo "======================================="
+gcloud artifacts repositories add-iam-policy-binding $ARTIFACT_REPO \
+    --project=$PROJECT_ID \
+    --location=$REGION \
+    --member="serviceAccount:${BACKEND_VM_SA}@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/artifactregistry.reader" >/dev/null
 
-# echo "======================================="
-# echo "Create a firewall rule for Backend 1 vm (proxy forwards requests to backend 1)"
-# echo "======================================="
+echo "======================================="
+echo "Create a firewall rule for Backend vms (proxys forward requests to backend vms)"
+echo "======================================="
 
-# if ! gcloud compute firewall-rules describe $BACKEND_1_FW_HTTP_NAME \
-#     --project=$PROJECT_ID >/dev/null 2>&1; then
-#     gcloud compute firewall-rules create $BACKEND_1_FW_HTTP_NAME \
-#         --network=$NETWORK_NAME \
-#         --direction=INGRESS \
-#         --action=ALLOW \
-#         --rules=tcp:8081 \
-#         --source-tags=$PROXY_VM_TAG \
-#         --target-tags=$BACKEND_1_VM_TAG \
-#         --project=$PROJECT_ID
-# fi
+if ! gcloud compute firewall-rules describe $BACKEND_FW_HTTP_NAME \
+    --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $BACKEND_FW_HTTP_NAME \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:8081 \
+        --source-tags=$PROXY_VM_TAG \
+        --target-tags=$BACKEND_VM_TAG \
+        --project=$PROJECT_ID
+fi
 
 
 

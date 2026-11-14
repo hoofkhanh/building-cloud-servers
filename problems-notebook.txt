@@ -43,3 +43,11 @@ repeated configurations manually
 sudo modprobe br_netfilter
 sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
 ```
+
+### 6. Load Balancer + MIG: Bastion, Proxies IAM Permissions
+
+**Problem:** MIG autoscaling creates and deletes VMs with different names, making individual VM-level IAM bindings difficult to maintain.
+
+**Solution:** Grant the Bastion service account permissions at the project level using IAM Conditions to restrict access to backend MIG instances (e.g. `app-mig-*`).
+
+**Benefits:** Automatically covers new and recreated VMs without manually updating IAM permissions.
