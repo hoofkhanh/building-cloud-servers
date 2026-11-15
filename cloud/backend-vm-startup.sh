@@ -4,7 +4,7 @@ sudo apt install docker.io -y
 sudo systemctl enable --now docker
 
 # Configuring Authentication for pulling images from Artifact Registry
-sudo -H gcloud auth configure-docker us-central1-docker.pkg.dev -y
+sudo -H gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 sudo docker pull us-central1-docker.pkg.dev/building-servers/my-repo/app:v1
 
 # Configuring Docker apps
@@ -57,8 +57,9 @@ sudo modprobe br_netfilter
 echo br_netfilter | sudo tee /etc/modules-load.d/br_netfilter.conf
 
 echo 'net.bridge.bridge-nf-call-iptables = 1' | sudo tee /etc/sysctl.d/99-br-netfilter.conf
+echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-ip-forward.conf
 
 sudo sysctl --system
 
-sudo apt install -y iptables-persistent
+sudo DEBIAN_FRONTEND=noninteractive apt install -y iptables-persistent
 sudo netfilter-persistent save
