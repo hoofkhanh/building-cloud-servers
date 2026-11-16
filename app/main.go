@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -61,11 +63,44 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
+func getVMName() (string, error) {
+	req, err := http.NewRequest(
+		"GET",
+		"http://metadata.google.internal/computeMetadata/v1/instance/name",
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Metadata-Flavor", "Google")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("metadata server returned %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	return string(body), err
+}
+
 func sayHello(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	vmName, err := getVMName()
+	if err != nil {
+		http.Error(w, "Unable to get VM name", http.StatusInternalServerError)
+		return
+	}
+
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Hello, World!",
+		"vm_name": vmName,
 	})
 }
 

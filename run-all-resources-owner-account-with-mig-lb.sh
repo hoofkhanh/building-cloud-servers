@@ -35,6 +35,18 @@ BACKEND_VM_TAG="backend-vm"
 BACKEND_FW_SSH_NAME="allow-bastion-to-backend-ssh"
 BACKEND_FW_HTTP_NAME="allow-proxy-to-backend-http"
 
+PARENT_FOLDER="building-cloud-servers"
+
+TEMPLATE_NAME="app-template"
+MIG_HC_FW="allow-ilb-health-check"
+MIG_HC="mig-autoheal-hc"
+MIG_NAME="app-mig"
+LB_HC="ilb-health-check"
+BACKEND_SERVICE_NAME="ilb-backend-service"
+LB_IP="ilb-ip"
+FD_RULE_NAME="ilb-forwarding-rule"
+ILB_TO_VMS_FW="allow-traffic-from-ilb-backend"
+
 gcloud services enable \
   compute.googleapis.com \
   iam.googleapis.com \
@@ -141,11 +153,13 @@ fi
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="group:$GROUP_NAME" \
-    --role="projects/$PROJECT_ID/roles/computeProjectGetter" >/dev/null
+    --role="projects/$PROJECT_ID/roles/computeProjectGetter" \
+    --condition=None >/dev/null
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="group:$GROUP_NAME" \
-    --role="roles/serviceusage.serviceUsageViewer" >/dev/null
+    --role="roles/serviceusage.serviceUsageViewer" \
+    --condition=None >/dev/null
 
 
 if ! gcloud iam roles describe computeVMAccess \
@@ -172,7 +186,8 @@ gcloud compute instances add-iam-policy-binding $BASTION_VM_NAME \
 
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="group:$GROUP_NAME" \
-  --role="roles/iap.tunnelResourceAccessor" >/dev/null
+  --role="roles/iap.tunnelResourceAccessor" \
+  --condition=None >/dev/null
 
 echo "======================================="
 echo "Create Artifact Repository, Cloud Storage, Cloud Build SA and grant some permissions to it"
@@ -220,7 +235,8 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="group:$GROUP_NAME" \
-  --role="roles/serviceusage.serviceUsageConsumer" >/dev/null
+  --role="roles/serviceusage.serviceUsageConsumer" \
+  --condition=None >/dev/null
 
 gcloud storage buckets add-iam-policy-binding \
   gs://${PROJECT_ID}-build-source \
@@ -234,7 +250,8 @@ gcloud storage buckets add-iam-policy-binding \
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="group:$GROUP_NAME" \
-  --role="roles/cloudbuild.builds.editor" >/dev/null
+  --role="roles/cloudbuild.builds.editor" \
+  --condition=None >/dev/null
 
 gcloud storage buckets add-iam-policy-binding \
   gs://${PROJECT_ID}-build-source \
@@ -248,7 +265,8 @@ gcloud storage buckets add-iam-policy-binding \
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:${CLOUD_BUILD_SA}@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/logging.logWriter" >/dev/null
+    --role="roles/logging.logWriter" \
+    --condition=None >/dev/null
 
 echo "======================================="
 echo "Create a Proxy VM's service account"
@@ -301,12 +319,14 @@ echo "Granting permissions to the Bastion VM's service account to allow it to co
 echo "======================================="
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
---member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
---role="projects/$PROJECT_ID/roles/computeProjectGetter" >/dev/null
+    --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="projects/$PROJECT_ID/roles/computeProjectGetter" \
+    --condition=None >/dev/null
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
---member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
---role="roles/serviceusage.serviceUsageViewer" >/dev/null
+    --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/serviceusage.serviceUsageViewer" \
+    --condition=None >/dev/null
 
 gcloud compute instances add-iam-policy-binding $PROXY_VM_NAME \
   --zone=$PROXY_VM_ZONE \
@@ -368,6 +388,144 @@ if ! gcloud iam service-accounts describe $BACKEND_VM_SA@$PROJECT_ID.iam.gservic
         --project=$PROJECT_ID
 fi
 
+echo "======================================="
+echo "Create an Internal Passthrough Network LB with Managed Instance Group for backend vms"
+echo "======================================="
+if ! gcloud compute instance-templates describe $TEMPLATE_NAME \
+        --project $PROJECT_ID \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute instance-templates create $TEMPLATE_NAME \
+        --project $PROJECT_ID \
+        --machine-type=e2-micro \
+        --image-family=ubuntu-2404-lts-amd64 \
+        --image-project=ubuntu-os-cloud \
+        --network=$NETWORK_NAME \
+        --subnet=$SUBNET_NAME \
+        --region=$REGION \
+        --instance-template-region=$REGION \
+        --no-address \
+        --tags=$BACKEND_VM_TAG \
+        --metadata=enable-oslogin=TRUE \
+        --metadata-from-file="startup-script=$HOME/$PARENT_FOLDER/cloud/backend-vm-startup.sh" \
+        --scopes=cloud-platform \
+        --service-account=$BACKEND_VM_SA@$PROJECT_ID.iam.gserviceaccount.com
+fi
+
+if ! gcloud compute firewall-rules describe $MIG_HC_FW \
+        --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $MIG_HC_FW \
+        --project=$PROJECT_ID \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:8081 \
+        --source-ranges=35.191.0.0/16,130.211.0.0/22 \
+        --target-tags=$BACKEND_VM_TAG
+fi
+
+if ! gcloud compute health-checks describe $MIG_HC \
+        --project=$PROJECT_ID \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute health-checks create http $MIG_HC \
+        --project=$PROJECT_ID \
+        --region=$REGION \
+        --port=8081 \
+        --request-path=/hello \
+        --check-interval=30s \
+        --timeout=10s \
+        --healthy-threshold=1 \
+        --unhealthy-threshold=3
+fi
+
+if ! gcloud compute instance-groups managed describe $MIG_NAME \
+        --project=$PROJECT_ID \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute instance-groups managed create $MIG_NAME \
+        --project=$PROJECT_ID \
+        --region=$REGION \
+        --zones=us-central1-a,us-central1-b \
+        --template=projects/$PROJECT_ID/regions/$REGION/instanceTemplates/$TEMPLATE_NAME \
+        --size=2 \
+        --health-check=projects/$PROJECT_ID/regions/$REGION/healthChecks/$MIG_HC \
+        --initial-delay=600 \
+        --action-on-vm-failed-health-check=repair
+fi
+
+# gcloud compute instance-groups managed set-autoscaling app-mig \
+#     --region=us-central1 \
+#     --min-num-replicas=2 \
+#     --max-num-replicas=5 \
+#     --target-cpu-utilization=0.60 \
+#     --cool-down-period=60
+
+if ! gcloud compute health-checks describe $LB_HC \
+        --project="$PROJECT_ID" \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute health-checks create tcp $LB_HC \
+        --project="$PROJECT_ID" \
+        --region=$REGION \
+        --port=8081
+fi
+
+if ! gcloud compute backend-services describe $BACKEND_SERVICE_NAME \
+        --project="$PROJECT_ID" \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute backend-services create $BACKEND_SERVICE_NAME \
+        --project="$PROJECT_ID" \
+        --region=$REGION \
+        --load-balancing-scheme=internal \
+        --protocol=TCP \
+        --network=$NETWORK_NAME \
+        --health-checks=$LB_HC \
+        --health-checks-region=$REGION
+
+    gcloud compute backend-services add-backend $BACKEND_SERVICE_NAME \
+        --project="$PROJECT_ID" \
+        --region=$REGION \
+        --instance-group=$MIG_NAME \
+        --instance-group-region=$REGION
+fi
+
+if ! gcloud compute addresses describe $LB_IP \
+        --project="$PROJECT_ID" \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute addresses create $LB_IP \
+        --project="$PROJECT_ID" \
+        --region=$REGION \
+        --subnet=$SUBNET_NAME \
+        --addresses=10.0.1.100
+fi
+
+if ! gcloud compute forwarding-rules describe $FD_RULE_NAME \
+        --project="$PROJECT_ID" \
+        --region=$REGION >/dev/null 2>&1; then
+    gcloud compute forwarding-rules create $FD_RULE_NAME \
+        --project="$PROJECT_ID" \
+        --region=$REGION \
+        --load-balancing-scheme=internal \
+        --network=$NETWORK_NAME \
+        --subnet=$SUBNET_NAME \
+        --address=$LB_IP \
+        --ip-protocol=TCP \
+        --ports=8081 \
+        --backend-service=$BACKEND_SERVICE_NAME \
+        --backend-service-region=$REGION
+fi
+
+echo "======================================="
+echo "Create a firewall rule for sending traffic to VMs, it can only work within the vpc network)"
+echo "======================================="
+if ! gcloud compute firewall-rules describe $ILB_TO_VMS_FW \
+    --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $ILB_TO_VMS_FW \
+        --project=$PROJECT_ID \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:8081 \
+        --source-ranges=10.0.1.0/24 \
+        --target-tags=backend-vm
+fi
 
 echo "======================================="
 echo "Create a firewall rule for Backend vms (bastion connects to backends)"
@@ -412,12 +570,18 @@ gcloud artifacts repositories add-iam-policy-binding $ARTIFACT_REPO \
     --member="serviceAccount:${BACKEND_VM_SA}@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/artifactregistry.reader" >/dev/null
 
+
+
+
+
+
+
+
 echo "======================================="
 echo "Create a firewall rule for Backend vms (proxys forward requests to backend vms)"
 echo "======================================="
-
 if ! gcloud compute firewall-rules describe $BACKEND_FW_HTTP_NAME \
-    --project=$PROJECT_ID >/dev/null 2>&1; then
+        --project=$PROJECT_ID >/dev/null 2>&1; then
     gcloud compute firewall-rules create $BACKEND_FW_HTTP_NAME \
         --network=$NETWORK_NAME \
         --direction=INGRESS \
@@ -427,8 +591,6 @@ if ! gcloud compute firewall-rules describe $BACKEND_FW_HTTP_NAME \
         --target-tags=$BACKEND_VM_TAG \
         --project=$PROJECT_ID
 fi
-
-
 
 echo "======================================="
 echo "Done"

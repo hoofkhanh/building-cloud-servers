@@ -5,7 +5,7 @@ sudo systemctl enable --now docker
 
 # Configuring Authentication for pulling images from Artifact Registry
 sudo -H gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-sudo docker pull us-central1-docker.pkg.dev/building-servers/my-repo/app:v1
+sudo docker pull us-central1-docker.pkg.dev/building-servers/my-repo/app:v2
 
 # Configuring Docker apps
 sudo docker network create \
@@ -36,7 +36,7 @@ sudo docker run -d \
     --network app-network \
     --ip 172.18.0.4 \
     -p 8081:8080 \
-    us-central1-docker.pkg.dev/building-servers/my-repo/app:v1
+    us-central1-docker.pkg.dev/building-servers/my-repo/app:v2
 
 # Configuring firewalls using iptables to restrict only the allowed containers can access the postgres' container
 APP_IP=$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' app)
