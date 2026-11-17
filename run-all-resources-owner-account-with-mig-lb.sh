@@ -45,7 +45,7 @@ LB_HC="ilb-health-check"
 BACKEND_SERVICE_NAME="ilb-backend-service"
 LB_IP="ilb-ip"
 FD_RULE_NAME="ilb-forwarding-rule"
-ILB_TO_VMS_FW="allow-traffic-from-ilb-backend"
+SN_TO_VMS_FW="allow-traffic-from-mysubnet-backend"
 
 gcloud services enable \
   compute.googleapis.com \
@@ -269,6 +269,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --condition=None >/dev/null
 
 echo "======================================="
+echo "Build an image and push it into Artifact Registry"
+echo "======================================="
+gcloud builds submit "$HOME/building-cloud-servers/app/" \
+    --project=$PROJECT_ID \
+    --region=$REGION \
+    --service-account="projects/$PROJECT_ID/serviceAccounts/$CLOUD_BUILD_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --gcs-source-staging-dir=gs://$PROJECT_ID-build-source/source \
+    --gcs-log-dir=gs://$PROJECT_ID-build-source/logs \
+    --tag=${REGION}-docker.pkg.dev/$PROJECT_ID/${ARTIFACT_REPO}/app:v2
+
+echo "======================================="
 echo "Create a Proxy VM's service account"
 echo "======================================="
 if ! gcloud iam service-accounts describe $PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com \
@@ -449,14 +460,15 @@ if ! gcloud compute instance-groups managed describe $MIG_NAME \
         --health-check=projects/$PROJECT_ID/regions/$REGION/healthChecks/$MIG_HC \
         --initial-delay=600 \
         --action-on-vm-failed-health-check=repair
+
+    gcloud compute instance-groups managed set-autoscaling $MIG_NAME \
+        --region=$REGION \
+        --min-num-replicas=2 \
+        --max-num-replicas=4 \
+        --target-cpu-utilization=0.60 \
+        --cool-down-period=600
 fi
 
-# gcloud compute instance-groups managed set-autoscaling app-mig \
-#     --region=us-central1 \
-#     --min-num-replicas=2 \
-#     --max-num-replicas=5 \
-#     --target-cpu-utilization=0.60 \
-#     --cool-down-period=60
 
 if ! gcloud compute health-checks describe $LB_HC \
         --project="$PROJECT_ID" \
@@ -515,9 +527,9 @@ fi
 echo "======================================="
 echo "Create a firewall rule for sending traffic to VMs, it can only work within the vpc network)"
 echo "======================================="
-if ! gcloud compute firewall-rules describe $ILB_TO_VMS_FW \
+if ! gcloud compute firewall-rules describe $SN_TO_VMS_FW \
     --project=$PROJECT_ID >/dev/null 2>&1; then
-    gcloud compute firewall-rules create $ILB_TO_VMS_FW \
+    gcloud compute firewall-rules create $SN_TO_VMS_FW \
         --project=$PROJECT_ID \
         --network=$NETWORK_NAME \
         --direction=INGRESS \
@@ -569,13 +581,6 @@ gcloud artifacts repositories add-iam-policy-binding $ARTIFACT_REPO \
     --location=$REGION \
     --member="serviceAccount:${BACKEND_VM_SA}@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/artifactregistry.reader" >/dev/null
-
-
-
-
-
-
-
 
 echo "======================================="
 echo "Create a firewall rule for Backend vms (proxys forward requests to backend vms)"
