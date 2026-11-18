@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">Private access and network security architecture</title>
+  <desc id="desc">Administrators access private VMs through IAP, OS Login, and a Bastion. Firewall rules restrict SSH paths. Cloud NAT and Private Google Access provide egress, and iptables filters application-to-database container traffic.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#52657a"/></marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#23835c"/></marker>
+    <style>
+      text { font-family: Inter, Arial, sans-serif; fill: #183047; }
+      .title { font-size: 29px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #52657a; }
+      .section { font-size: 14px; font-weight: 700; letter-spacing: .8px; fill: #52657a; }
+      .heading { font-size: 17px; font-weight: 700; }
+      .body { font-size: 13px; fill: #42566b; }
+      .small { font-size: 11.5px; fill: #52657a; }
+      .card { fill: #fff; stroke: #cbd6e2; stroke-width: 1.5; }
+      .purple { fill: #f4f0ff; stroke: #a894dd; stroke-width: 1.5; }
+      .green { fill: #edf8f2; stroke: #83b99c; stroke-width: 1.5; }
+      .blue { fill: #edf5ff; stroke: #79a9dc; stroke-width: 1.5; }
+      .edge { fill: none; stroke: #52657a; stroke-width: 2.2; marker-end: url(#arrow); }
+      .green-edge { fill: none; stroke: #23835c; stroke-width: 2.2; marker-end: url(#greenArrow); }
+    </style>
+  </defs>
+  <rect width="1400" height="760" fill="#f5f8fc"/>
+  <text x="48" y="55" class="title">Private Access &amp; Network Security</text>
+  <text x="48" y="84" class="subtitle">Identity-managed administration, restricted firewall paths, and private network egress</text>
+
+  <rect x="38" y="118" width="1324" height="270" rx="18" fill="#f7f4ff" stroke="#d4cbed" stroke-width="1.5"/>
+  <text x="62" y="149" class="section">ADMINISTRATIVE ACCESS</text>
+  <rect x="66" y="190" width="190" height="100" rx="12" class="card"/>
+  <text x="161" y="231" text-anchor="middle" class="heading">Administrator</text>
+  <text x="161" y="259" text-anchor="middle" class="small">Google identity</text>
+  <rect x="326" y="190" width="210" height="100" rx="12" class="purple"/>
+  <text x="431" y="231" text-anchor="middle" class="heading">IAP TCP tunnel</text>
+  <text x="431" y="259" text-anchor="middle" class="small">OS Login + IAM</text>
+  <rect x="606" y="190" width="200" height="100" rx="12" class="purple"/>
+  <text x="706" y="231" text-anchor="middle" class="heading">Bastion VM</text>
+  <text x="706" y="259" text-anchor="middle" class="small">Private · no external IP</text>
+  <rect x="876" y="190" width="230" height="100" rx="12" class="blue"/>
+  <text x="991" y="231" text-anchor="middle" class="heading">Private VMs</text>
+  <text x="991" y="259" text-anchor="middle" class="small">Nginx proxies + backend MIG</text>
+  <rect x="1176" y="190" width="155" height="100" rx="12" class="card"/>
+  <text x="1253" y="228" text-anchor="middle" class="body" font-weight="700">Conditional IAM</text>
+  <text x="1253" y="252" text-anchor="middle" class="small">Scopes Bastion</text>
+  <text x="1253" y="271" text-anchor="middle" class="small">backend MIG access</text>
+  <path d="M256 240 H326" class="edge"/>
+  <path d="M536 240 H606" class="edge"/>
+  <path d="M806 240 H876" class="edge"/>
+  <text x="291" y="222" text-anchor="middle" class="small">Connect</text>
+  <text x="571" y="222" text-anchor="middle" class="small">SSH :22</text>
+  <text x="841" y="222" text-anchor="middle" class="small">SSH :22</text>
+  <text x="66" y="330" class="body" font-weight="700">Firewall:</text>
+  <text x="126" y="330" class="body">IAP source range → Bastion; Bastion source tag → private VMs.</text>
+  <text x="66" y="356" class="small">OS Login centralizes identity and SSH permissions through IAM instead of manually managed user keys.</text>
+
+  <rect x="38" y="420" width="632" height="300" rx="18" fill="#edf8f2" stroke="#c7e0d1" stroke-width="1.5"/>
+  <text x="62" y="452" class="section">PRIVATE EGRESS · NO EXTERNAL VM IPs</text>
+  <rect x="62" y="490" width="145" height="72" rx="10" class="card"/>
+  <text x="134" y="520" text-anchor="middle" class="body" font-weight="700">Private VMs</text>
+  <text x="134" y="543" text-anchor="middle" class="small">Internet traffic</text>
+  <rect x="270" y="490" width="145" height="72" rx="10" class="green"/>
+  <text x="342" y="520" text-anchor="middle" class="body" font-weight="700">Cloud NAT</text>
+  <text x="342" y="543" text-anchor="middle" class="small">Outbound access</text>
+  <rect x="478" y="490" width="166" height="72" rx="10" class="card"/>
+  <text x="561" y="520" text-anchor="middle" class="body" font-weight="700">Package sources</text>
+  <text x="561" y="543" text-anchor="middle" class="small">Installs + updates</text>
+  <path d="M207 526 H270" class="green-edge"/>
+  <path d="M415 526 H478" class="green-edge"/>
+  <rect x="62" y="604" width="145" height="72" rx="10" class="card"/>
+  <text x="134" y="634" text-anchor="middle" class="body" font-weight="700">Private VMs</text>
+  <text x="134" y="657" text-anchor="middle" class="small">Google API calls</text>
+  <rect x="270" y="604" width="145" height="72" rx="10" class="green"/>
+  <text x="342" y="634" text-anchor="middle" class="body" font-weight="700">Private Google</text>
+  <text x="342" y="657" text-anchor="middle" class="small">Access</text>
+  <rect x="478" y="604" width="166" height="72" rx="10" class="card"/>
+  <text x="561" y="634" text-anchor="middle" class="body" font-weight="700">Google Cloud APIs</text>
+  <text x="561" y="657" text-anchor="middle" class="small">Private API access</text>
+  <path d="M207 640 H270" class="green-edge"/>
+  <path d="M415 640 H478" class="green-edge"/>
+
+  <rect x="698" y="420" width="664" height="300" rx="18" fill="#eef5fc" stroke="#c9d8e8" stroke-width="1.5"/>
+  <text x="722" y="452" class="section">CONTAINER-LEVEL FIREWALL</text>
+  <rect x="730" y="520" width="170" height="110" rx="12" class="blue"/>
+  <text x="815" y="563" text-anchor="middle" class="heading">Application</text>
+  <text x="815" y="589" text-anchor="middle" class="small">Docker container</text>
+  <rect x="945" y="520" width="190" height="110" rx="12" class="purple"/>
+  <text x="1040" y="563" text-anchor="middle" class="heading">iptables</text>
+  <text x="1040" y="589" text-anchor="middle" class="small">Docker bridge filter</text>
+  <rect x="1180" y="520" width="150" height="110" rx="12" class="card"/>
+  <text x="1255" y="563" text-anchor="middle" class="heading">PostgreSQL</text>
+  <text x="1255" y="589" text-anchor="middle" class="small">Docker container</text>
+  <path d="M900 575 H945" class="edge"/>
+  <path d="M1135 575 H1180" class="edge"/>
+  <text x="1045" y="665" text-anchor="middle" class="small">Allow app-to-database traffic; block other container sources.</text>
+</svg>
