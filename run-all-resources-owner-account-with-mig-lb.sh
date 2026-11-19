@@ -47,6 +47,23 @@ LB_IP="ilb-ip"
 FD_RULE_NAME="ilb-forwarding-rule"
 SN_TO_VMS_FW="allow-traffic-from-mysubnet-backend"
 
+PROXY_TEMPLATE_NAME="proxy-template"
+PROXY_MIG_NAME="proxy-mig"
+
+PROXY_MIG_HC="proxy-mig-autoheal-hc"
+ELB_HC="elb-health-check"
+ELB_BACKEND_SERVICE="elb-backend-service"
+ELB_IP="elb-ip"
+ELB_URL_MAP="proxy-elb-url-map"
+ELB_HTTP_PROXY="proxy-elb-http-proxy"
+ELB_FORWARDING_RULE="elb-forwarding-rule"
+
+PROXY_ONLY_SUBNET="proxy-only-subnet"
+PROXY_ONLY_SUBNET_RANGE="10.0.3.0/24"
+
+ELB_HC_FW="allow-elb-health-check"
+ELB_BACKEND_FW="allow-traffic-from-elb-backend"
+
 gcloud services enable \
   compute.googleapis.com \
   iam.googleapis.com \
@@ -596,6 +613,251 @@ if ! gcloud compute firewall-rules describe $BACKEND_FW_HTTP_NAME \
         --target-tags=$BACKEND_VM_TAG \
         --project=$PROJECT_ID
 fi
+
+
+echo "======================================="
+echo "CREATE PROXY INSTANCE TEMPLATE"
+echo "======================================="
+
+if ! gcloud compute instance-templates describe $PROXY_TEMPLATE_NAME \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute instance-templates create $PROXY_TEMPLATE_NAME \
+        --project="$PROJECT_ID" \
+        --machine-type=e2-micro \
+        --image-family=ubuntu-2404-lts-amd64 \
+        --image-project=ubuntu-os-cloud \
+        --network=$NETWORK_NAME \
+        --subnet=$SUBNET_NAME \
+        --region=$REGION \
+        --instance-template-region=$REGION \
+        --no-address \
+        --tags=$PROXY_VM_TAG \
+        --metadata=enable-oslogin=TRUE \
+        --metadata-from-file="startup-script=$HOME/$PARENT_FOLDER/cloud/nginx-vm-startup.sh" \
+        --scopes=cloud-platform \
+        --service-account=$PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com
+fi
+
+echo "======================================="
+echo "CREATE FIREWALL RULE FOR ELB HEALTH CHECKS"
+echo "======================================="
+
+if ! gcloud compute firewall-rules describe $ELB_HC_FW \
+    --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+    gcloud compute firewall-rules create $ELB_HC_FW \
+        --project="$PROJECT_ID" \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:80 \
+        --source-ranges=35.191.0.0/16,130.211.0.0/22 \
+        --target-tags=$PROXY_VM_TAG
+fi
+
+echo "======================================="
+echo "CREATE PROXY MIG AUTOHEAL HEALTH CHECK"
+echo "======================================="
+
+if ! gcloud compute health-checks describe $PROXY_MIG_HC \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute health-checks create http $PROXY_MIG_HC \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --port=80 \
+        --request-path=/ \
+        --check-interval=30s \
+        --timeout=10s \
+        --healthy-threshold=1 \
+        --unhealthy-threshold=3
+fi
+
+echo "======================================="
+echo "CREATE PROXY MANAGED INSTANCE GROUP"
+echo "======================================="
+
+if ! gcloud compute instance-groups managed describe $PROXY_MIG_NAME \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute instance-groups managed create $PROXY_MIG_NAME \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --zones=us-central1-a,us-central1-b \
+        --template=projects/$PROJECT_ID/regions/$REGION/instanceTemplates/$PROXY_TEMPLATE_NAME \
+        --size=2 \
+        --health-check=projects/$PROJECT_ID/regions/$REGION/healthChecks/$PROXY_MIG_HC \
+        --initial-delay=150 \
+        --action-on-vm-failed-health-check=repair
+fi
+
+echo "======================================="
+echo "CONFIGURE PROXY MIG NAMED PORTS"
+echo "======================================="
+
+gcloud compute instance-groups managed set-named-ports $PROXY_MIG_NAME \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --named-ports=khanh:80
+
+echo "======================================="
+echo "CONFIGURE PROXY MIG AUTOSCALING"
+echo "======================================="
+
+gcloud compute instance-groups managed set-autoscaling $PROXY_MIG_NAME \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --min-num-replicas=2 \
+    --max-num-replicas=4 \
+    --target-cpu-utilization=0.60 \
+    --cool-down-period=150
+
+echo "======================================="
+echo "CREATE EXTERNAL APPLICATION LOAD BALANCER HEALTH CHECK"
+echo "======================================="
+
+if ! gcloud compute health-checks describe $ELB_HC \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute health-checks create http $ELB_HC \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --port=80 \
+        --request-path=/ \
+        --check-interval=5s \
+        --timeout=5s \
+        --healthy-threshold=2 \
+        --unhealthy-threshold=2
+fi
+
+echo "======================================="
+echo "CREATE EXTERNAL MANAGED BACKEND SERVICE"
+echo "======================================="
+
+if ! gcloud compute backend-services describe $ELB_BACKEND_SERVICE \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute backend-services create $ELB_BACKEND_SERVICE \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --load-balancing-scheme=EXTERNAL_MANAGED \
+        --protocol=HTTP \
+        --port-name=khanh \
+        --health-checks=$ELB_HC \
+        --health-checks-region="$REGION"
+
+    gcloud compute backend-services add-backend $ELB_BACKEND_SERVICE \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --instance-group=$PROXY_MIG_NAME \
+        --instance-group-region="$REGION"
+fi
+
+echo "======================================="
+echo "CREATE EXTERNAL LOAD BALANCER IP"
+echo "======================================="
+
+if ! gcloud compute addresses describe $ELB_IP \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute addresses create $ELB_IP \
+        --project="$PROJECT_ID" \
+        --region="$REGION"
+fi
+
+echo "======================================="
+echo "CREATE URL MAP"
+echo "======================================="
+
+if ! gcloud compute url-maps describe $ELB_URL_MAP \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute url-maps create $ELB_URL_MAP \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --default-service=$ELB_BACKEND_SERVICE
+fi
+
+echo "======================================="
+echo "CREATE REGIONAL TARGET HTTP PROXY"
+echo "======================================="
+
+if ! gcloud compute target-http-proxies describe $ELB_HTTP_PROXY \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute target-http-proxies create $ELB_HTTP_PROXY \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --url-map=$ELB_URL_MAP
+fi
+
+echo "======================================="
+echo "CREATE REGIONAL MANAGED PROXY SUBNET"
+echo "======================================="
+
+if ! gcloud compute networks subnets describe $PROXY_ONLY_SUBNET \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute networks subnets create $PROXY_ONLY_SUBNET \
+        --project="$PROJECT_ID" \
+        --network=$NETWORK_NAME \
+        --region="$REGION" \
+        --range=$PROXY_ONLY_SUBNET_RANGE \
+        --purpose=REGIONAL_MANAGED_PROXY \
+        --role=ACTIVE
+fi
+
+echo "======================================="
+echo "CREATE EXTERNAL MANAGED FORWARDING RULE"
+echo "======================================="
+
+if ! gcloud compute forwarding-rules describe $ELB_FORWARDING_RULE \
+    --project="$PROJECT_ID" \
+    --region="$REGION" >/dev/null 2>&1; then
+
+    gcloud compute forwarding-rules create $ELB_FORWARDING_RULE \
+        --project="$PROJECT_ID" \
+        --region="$REGION" \
+        --network=$NETWORK_NAME \
+        --load-balancing-scheme=EXTERNAL_MANAGED \
+        --address=$ELB_IP \
+        --target-http-proxy=$ELB_HTTP_PROXY \
+        --target-http-proxy-region="$REGION" \
+        --ports=80
+fi
+
+echo "======================================="
+echo "ALLOW TRAFFIC FROM REGIONAL MANAGED PROXY SUBNET"
+echo "======================================="
+
+GG_MANAGED_PROXY_IP_RANGE=$(gcloud compute networks subnets describe $PROXY_ONLY_SUBNET \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --format="get(ipCidrRange)")
+
+if ! gcloud compute firewall-rules describe $ELB_BACKEND_FW \
+    --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+    gcloud compute firewall-rules create $ELB_BACKEND_FW \
+        --project="$PROJECT_ID" \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:80 \
+        --source-ranges=$GG_MANAGED_PROXY_IP_RANGE \
+        --target-tags=$PROXY_VM_TAG
+fi
+
 
 echo "======================================="
 echo "Done"
