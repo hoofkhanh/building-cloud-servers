@@ -63,6 +63,17 @@ PROXY_ONLY_SUBNET_RANGE="10.0.3.0/24"
 ELB_HC_FW="allow-elb-health-check"
 ELB_BACKEND_FW="allow-traffic-from-elb-backend"
 
+OBSERVABILITY_SERVER="observability-server"
+OBSERVABILITY_SERVER_TYPE="e2-small"
+OBSERVABILITY_SERVER_TAG="observability-server"
+OBSERVABILITY_VM_SA="observability-vm-sa"
+OBSERVABILITY_VM_SA_EMAIL="observability-vm-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+
+BASTION_SSH_OB_FW="allow-bastion-ssh-observability"
+NODE_EXPORTER_FW="allow-prometheus-node-exporter-proxy-vm"
+LOKI_FW="allow-proxy-vm-to-loki"
+GRAFANA_FW="allow-grafana-3000"
+
 gcloud services enable \
   compute.googleapis.com \
   iam.googleapis.com \
@@ -864,8 +875,87 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 
 
 echo "======================================="
-echo "Done"
+echo "Create an observability vm"
 echo "======================================="
+gcloud iam service-accounts create "$OBSERVABILITY_VM_SA" \
+  --project="$PROJECT_ID" \
+  --display-name="Observability Server Service Account"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$OBSERVABILITY_VM_SA_EMAIL" \
+  --role="roles/compute.viewer" \
+  --condition=None
+
+
+gcloud compute instances create "$OBSERVABILITY_SERVER" \
+  --project="$PROJECT_ID" \
+  --zone="$ZONE" \
+  --machine-type="$OBSERVABILITY_SERVER_TYPE" \
+  --network="$NETWORK_NAME" \
+  --subnet="$SUBNET_NAME" \
+  --image-family=ubuntu-2404-lts-amd64 \
+  --image-project=ubuntu-os-cloud \
+  --scopes=cloud-platform \
+  --no-address \
+  --metadata=enable-oslogin=TRUE \
+  --tags="$OBSERVABILITY_SERVER_TAG" \
+  --service-account="$OBSERVABILITY_VM_SA_EMAIL" \
+  --metadata-from-file="startup-script=$HOME/$PARENT_FOLDER/cloud/observability-vm-startup.sh"
+
+echo "======================================="
+echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Observability VM"
+echo "======================================="
+OBSERVABILITY_VM_SA=observability-sa@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding "$OBSERVABILITY_VM_SA_EMAIL" \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:$BASTION_VM_SA" \
+  --role="roles/iam.serviceAccountUser"
+
+gcloud compute instances add-iam-policy-binding "$OBSERVABILITY_SERVER" \
+  --zone="$ZONE" \
+  --project="$PROJECT_ID" \
+  --member="serviceAccount:$BASTION_VM_SA" \
+  --role="roles/compute.osAdminLogin"
+
+gcloud compute firewall-rules create "$BASTION_SSH_OB_FW_FW" \
+  --project="$PROJECT_ID" \
+  --network="$NETWORK_NAME" \
+  --direction=INGRESS \
+  --action=ALLOW \
+  --rules=tcp:22 \
+  --source-tags="$BASTION_VM_TAG" \
+  --target-tags="$OBSERVABILITY_SERVER_TAG"
+
+
+echo "======================================="
+echo "Configuring some firewall rules to allow Prometheus, Loki to communicate each other"
+echo "======================================="
+gcloud compute firewall-rules create "$NODE_EXPORTER_FW" \
+  --project="$PROJECT_ID" \
+  --network="$NETWORK_NAME" \
+  --allow=tcp:9100 \
+  --source-tags="$OBSERVABILITY_SERVER_TAG" \
+  --target-tags=$PROXY_VM_TAG
+
+gcloud compute firewall-rules create "$LOKI_FW" \
+  --project="$PROJECT_ID" \
+  --network="$NETWORK_NAME" \
+  --direction=INGRESS \
+  --action=ALLOW \
+  --rules=tcp:3100 \
+  --source-tags=$PROXY_VM_TAG \
+  --target-tags="$OBSERVABILITY_SERVER_TAG" \
+  --description="Allow proxy VM to push logs to Loki"
+
+gcloud compute firewall-rules create "$GRAFANA_FW" \
+  --project="$PROJECT_ID" \
+  --network="$NETWORK_NAME" \
+  --direction=INGRESS \
+  --action=ALLOW \
+  --rules=tcp:3000 \
+  --source-ranges=0.0.0.0/0 \
+  --target-tags="$OBSERVABILITY_SERVER_TAG" \
+  --description="Allow Grafana access"
 
 echo "======================================="
 echo "Done"
