@@ -22,7 +22,6 @@ APP_IMAGE_VERSION="v1"
 CLOUD_BUILD_SA="cloud-build-runner"
 
 PROXY_VM_SA="proxy-vm-sa"
-PROXY_VM_NAME="proxy-server"
 PROXY_VM_TAG="proxy-vm"
 PROXY_FW_NAME="allow-bastion-to-proxy-ssh"
 
@@ -296,55 +295,34 @@ gcloud builds submit "$HOME/building-cloud-servers/app/" \
     --gcs-log-dir=gs://$PROJECT_ID-build-source/logs \
     --tag=${REGION}-docker.pkg.dev/$PROJECT_ID/${ARTIFACT_REPO}/app:v2
 
-echo "======================================="
-echo "Create a Proxy VM's service account"
-echo "======================================="
-if ! gcloud iam service-accounts describe $PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com \
-    --project=$PROJECT_ID >/dev/null 2>&1; then
-    gcloud iam service-accounts create $PROXY_VM_SA \
-        --project=$PROJECT_ID
-fi
 
-echo "======================================="
-echo "Create a Proxy VM"
-echo "======================================="
-if ! gcloud compute instances describe $PROXY_VM_NAME \
-    --project=$PROJECT_ID \
-    --zone=$PROXY_VM_ZONE >/dev/null 2>&1; then
-    gcloud compute instances create $PROXY_VM_NAME \
-        --project=$PROJECT_ID \
-        --network=$NETWORK_NAME \
-        --subnet=$SUBNET_NAME \
-        --zone=$PROXY_VM_ZONE \
-        --machine-type=e2-micro \
-        --image-family=ubuntu-2404-lts-amd64 \
-        --image-project=ubuntu-os-cloud \
-        --no-address \
-        --tags=$PROXY_VM_TAG \
-        --metadata=enable-oslogin=TRUE \
-        --scopes=cloud-platform \
-        --service-account=${PROXY_VM_SA}@${PROJECT_ID}.iam.gserviceaccount.com
-fi
 
-echo "======================================="
-echo "Create a firewall rule for proxy vm"
-echo "======================================="
+# echo "======================================="
+# echo "Create a Proxy VM"
+# echo "======================================="
+# if ! gcloud compute instances describe $PROXY_VM_NAME \
+#     --project=$PROJECT_ID \
+#     --zone=$PROXY_VM_ZONE >/dev/null 2>&1; then
+#     gcloud compute instances create $PROXY_VM_NAME \
+#         --project=$PROJECT_ID \
+#         --network=$NETWORK_NAME \
+#         --subnet=$SUBNET_NAME \
+#         --zone=$PROXY_VM_ZONE \
+#         --machine-type=e2-micro \
+#         --image-family=ubuntu-2404-lts-amd64 \
+#         --image-project=ubuntu-os-cloud \
+#         --no-address \
+#         --tags=$PROXY_VM_TAG \
+#         --metadata=enable-oslogin=TRUE \
+#         --scopes=cloud-platform \
+#         --service-account=${PROXY_VM_SA}@${PROJECT_ID}.iam.gserviceaccount.com
+# fi
 
-if ! gcloud compute firewall-rules describe $PROXY_FW_NAME \
-    --project=$PROJECT_ID >/dev/null 2>&1; then
-    gcloud compute firewall-rules create $PROXY_FW_NAME \
-        --network=$NETWORK_NAME \
-        --direction=INGRESS \
-        --action=ALLOW \
-        --rules=tcp:22 \
-        --source-tags=$BASTION_VM_TAG \
-        --target-tags=$PROXY_VM_TAG \
-        --project=$PROJECT_ID
-fi
 
-echo "======================================="
-echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Proxy VM"
-echo "======================================="
+
+# echo "======================================="
+# echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Proxy VM, Backend VM"
+# echo "======================================="
 
 gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
@@ -355,23 +333,6 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/serviceusage.serviceUsageViewer" \
     --condition=None >/dev/null
-
-gcloud compute instances add-iam-policy-binding $PROXY_VM_NAME \
-  --zone=$PROXY_VM_ZONE \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="projects/$PROJECT_ID/roles/computeVMAccess" >/dev/null
-
-gcloud iam service-accounts add-iam-policy-binding "$PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-    --project="$PROJECT_ID" \
-    --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/iam.serviceAccountUser" >/dev/null
-
-gcloud compute instances add-iam-policy-binding $PROXY_VM_NAME \
-  --zone=$PROXY_VM_ZONE \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/compute.osAdminLogin" >/dev/null
 
 echo "======================================="
 echo "Enable Private Google Access, allowing VMs without external IP addresses to access Google Cloud APIs privately without requiring Cloud NAT. This allows the VM to call compute.googleapis.com."
@@ -614,6 +575,14 @@ if ! gcloud compute firewall-rules describe $BACKEND_FW_HTTP_NAME \
         --project=$PROJECT_ID
 fi
 
+echo "======================================="
+echo "Create a Proxy VM's service account"
+echo "======================================="
+if ! gcloud iam service-accounts describe $PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com \
+    --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud iam service-accounts create $PROXY_VM_SA \
+        --project=$PROJECT_ID
+fi
 
 echo "======================================="
 echo "CREATE PROXY INSTANCE TEMPLATE"
@@ -858,6 +827,45 @@ if ! gcloud compute firewall-rules describe $ELB_BACKEND_FW \
         --target-tags=$PROXY_VM_TAG
 fi
 
+echo "======================================="
+echo "Create a firewall rule for proxy vm"
+echo "======================================="
+
+if ! gcloud compute firewall-rules describe $PROXY_FW_NAME \
+    --project=$PROJECT_ID >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $PROXY_FW_NAME \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:22 \
+        --source-tags=$BASTION_VM_TAG \
+        --target-tags=$PROXY_VM_TAG \
+        --project=$PROJECT_ID
+fi
+
+echo "======================================="
+echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Proxy VMs"
+echo "======================================="
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="projects/$PROJECT_ID/roles/computeVMAccess" \
+  --condition='expression=resource.type == "compute.googleapis.com/Instance" && resource.name.extract("/instances/{name}").startsWith("proxy-mig-"),title=proxy-mig-only,description=Allow Bastion access only to proxy MIG instances'
+
+gcloud iam service-accounts add-iam-policy-binding "$PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:$BASTION_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+    --role="roles/iam.serviceAccountUser" >/dev/null
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:bastion-vm-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/compute.osAdminLogin" \
+  --condition='expression=(resource.type == "compute.googleapis.com/Instance" && resource.name.extract("/instances/{name}").startsWith("proxy-mig-")),title=proxy-mig-only,description=Allow OS Admin Login only to proxy MIG instances'
+
+
+echo "======================================="
+echo "Done"
+echo "======================================="
 
 echo "======================================="
 echo "Done"
