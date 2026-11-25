@@ -105,11 +105,16 @@ echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stab
 sudo apt-get update
 sudo apt-get install alloy
 
-OBSERVABILITY_INTERNAL_IP=$(gcloud compute instances describe observability-server \
+until OBSERVABILITY_INTERNAL_IP=$(gcloud compute instances describe observability-server \
   --zone=us-central1-a \
-  --format="get(networkInterfaces[0].networkIP)")
+  --format="get(networkInterfaces[0].networkIP)" 2>/dev/null) && [[ -n "$OBSERVABILITY_INTERNAL_IP" ]]; do
+    echo "Waiting for observability-server internal IP..."
+    sleep 5
+done
 
-sudo tee /etc/alloy/config.alloy > /dev/null <<'EOF'
+echo "Observability internal IP: $OBSERVABILITY_INTERNAL_IP"
+
+sudo tee /etc/alloy/config.alloy > /dev/null <<EOF
 // Discover Linux log files
 local.file_match "vm_logs" {
   path_targets = [
@@ -166,11 +171,35 @@ loki.source.journal "nginx_logs" {
   }
 }
 
+// Discover Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Collect Docker container logs through Docker API
+loki.source.docker "docker_logs" {
+  host    = "unix:///var/run/docker.sock"
+  targets = discovery.docker.containers.targets
+
+  labels = {
+    job      = "docker",
+    host     = constants.hostname,
+    log_type = "container",
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+
 loki.write "loki" {
   endpoint {
     url = "http://${OBSERVABILITY_INTERNAL_IP}:3100/loki/api/v1/push"
   }
 }
+EOF
+
+sudo usermod -aG alloydocker 
+sudo systemctl restart alloy
 
 sudo alloy validate /etc/alloy/config.alloy
 sudo systemctl start alloy

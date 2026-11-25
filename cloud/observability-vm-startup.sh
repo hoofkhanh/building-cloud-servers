@@ -29,7 +29,22 @@ scrape_configs:
 
     relabel_configs:
       - source_labels: [__meta_gce_metadata_created_by]
-        regex: '.*/ instanceGroupManagers/proxy-mig'
+        regex: '.*/instanceGroupManagers/proxy-mig'
+        action: keep
+
+  - job_name: 'app-mig'
+    gce_sd_configs:
+      - project: building-servers
+        zone: us-central1-a
+        port: 9100
+
+      - project: building-servers
+        zone: us-central1-b
+        port: 9100
+
+    relabel_configs:
+      - source_labels: [__meta_gce_metadata_created_by]
+        regex: '.*/instanceGroupManagers/app-mig'
         action: keep
 EOF
 
@@ -139,4 +154,4 @@ analytics:
   reporting_enabled: false
 EOF
 
-cd.. && sudo docker compose up -d
+cd .. && sudo docker compose up -d

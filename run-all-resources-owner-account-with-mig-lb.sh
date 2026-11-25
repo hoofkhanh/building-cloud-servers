@@ -6,6 +6,7 @@ REGION="us-central1"
 BASTION_VM_ZONE="us-central1-a"
 PROXY_VM_ZONE="us-central1-a"
 BACKEND_VM_ZONE="us-central1-b"
+OBSERVABILITY_VM_ZONE="us-central1-a"
 GROUP_NAME="hoofkhanh-devops-engineers@googlegroups.com"
 
 NETWORK_NAME="my-vpc"
@@ -69,10 +70,12 @@ OBSERVABILITY_SERVER_TAG="observability-server"
 OBSERVABILITY_VM_SA="observability-vm-sa"
 OBSERVABILITY_VM_SA_EMAIL="observability-vm-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
-BASTION_SSH_OB_FW="allow-bastion-ssh-observability"
+SSH_OB_FW="allow-all-ssh-ob-fw"
 NODE_EXPORTER_FW="allow-prometheus-node-exporter-proxy-vm"
 LOKI_FW="allow-proxy-vm-to-loki"
 GRAFANA_FW="allow-grafana-3000"
+BACKEND_VM_LOKI_FW="allow-backend-vm-to-loki"
+BACKEND_NODE_EXPORTER_FW="allow-prometheus-node-exporter-backend-vm"
 
 gcloud services enable \
   compute.googleapis.com \
@@ -877,9 +880,18 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 echo "======================================="
 echo "Create an observability vm"
 echo "======================================="
-gcloud iam service-accounts create "$OBSERVABILITY_VM_SA" \
-  --project="$PROJECT_ID" \
-  --display-name="Observability Server Service Account"
+if gcloud iam service-accounts describe "$OBSERVABILITY_VM_SA_EMAIL" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+  echo "Observability service account already exists. Skipping."
+
+else
+
+  gcloud iam service-accounts create "$OBSERVABILITY_VM_SA" \
+    --project="$PROJECT_ID" \
+    --display-name="Observability Server Service Account"
+
+fi
 
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$OBSERVABILITY_VM_SA_EMAIL" \
@@ -887,75 +899,169 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --condition=None
 
 
-gcloud compute instances create "$OBSERVABILITY_SERVER" \
+if gcloud compute instances describe "$OBSERVABILITY_SERVER" \
   --project="$PROJECT_ID" \
-  --zone="$ZONE" \
-  --machine-type="$OBSERVABILITY_SERVER_TYPE" \
-  --network="$NETWORK_NAME" \
-  --subnet="$SUBNET_NAME" \
-  --image-family=ubuntu-2404-lts-amd64 \
-  --image-project=ubuntu-os-cloud \
-  --scopes=cloud-platform \
-  --no-address \
-  --metadata=enable-oslogin=TRUE \
-  --tags="$OBSERVABILITY_SERVER_TAG" \
-  --service-account="$OBSERVABILITY_VM_SA_EMAIL" \
-  --metadata-from-file="startup-script=$HOME/$PARENT_FOLDER/cloud/observability-vm-startup.sh"
+  --zone="$OBSERVABILITY_VM_ZONE" >/dev/null 2>&1; then
+
+  echo "Observability VM already exists. Skipping."
+
+else
+
+  gcloud compute instances create "$OBSERVABILITY_SERVER" \
+    --project="$PROJECT_ID" \
+    --zone="$OBSERVABILITY_VM_ZONE" \
+    --machine-type="$OBSERVABILITY_SERVER_TYPE" \
+    --network="$NETWORK_NAME" \
+    --subnet="$SUBNET_NAME" \
+    --image-family=ubuntu-2404-lts-amd64 \
+    --image-project=ubuntu-os-cloud \
+    --scopes=cloud-platform \
+    --tags="$OBSERVABILITY_SERVER_TAG" \
+    --service-account="$OBSERVABILITY_VM_SA_EMAIL" \
+    --metadata-from-file="startup-script=$HOME/$PARENT_FOLDER/cloud/observability-vm-startup.sh"
+
+fi
+
+# Allow nginx-vm and backend-vm startup scripts to get internal ip of observability-server 
+gcloud compute instances add-iam-policy-binding $OBSERVABILITY_SERVER \
+  --zone=$OBSERVABILITY_VM_ZONE \
+  --project=$PROJECT_ID \
+  --member="serviceAccount:$PROXY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/compute.viewer"
+
+  gcloud compute instances add-iam-policy-binding $OBSERVABILITY_SERVER \
+  --zone=$OBSERVABILITY_VM_ZONE \
+  --project=$PROJECT_ID \
+  --member="serviceAccount:$BACKEND_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/compute.viewer"
+
+# Support MIG Discovery
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$OBSERVABILITY_VM_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="projects/$PROJECT_ID/roles/computeVMAccess" \
+  --condition=None
+
+if gcloud compute firewall-rules describe "$SSH_OB_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+  echo "Firewall rule $SSH_OB_FW already exists. Skipping."
+
+else
+
+  gcloud compute firewall-rules create "$SSH_OB_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:22 \
+    --source-ranges=0.0.0.0/0 \
+    --target-tags="$OBSERVABILITY_SERVER_TAG"
+
+fi
+
 
 echo "======================================="
-echo "Granting permissions to the Bastion VM's service account to allow it to connect to the Observability VM"
+echo "Configuring some firewall rules to allow Prometheus, Loki to communicate each other for Observability vm and proxy, backend vms"
 echo "======================================="
-OBSERVABILITY_VM_SA=observability-sa@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
-gcloud iam service-accounts add-iam-policy-binding "$OBSERVABILITY_VM_SA_EMAIL" \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:$BASTION_VM_SA" \
-  --role="roles/iam.serviceAccountUser"
+if gcloud compute firewall-rules describe "$NODE_EXPORTER_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
 
-gcloud compute instances add-iam-policy-binding "$OBSERVABILITY_SERVER" \
-  --zone="$ZONE" \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:$BASTION_VM_SA" \
-  --role="roles/compute.osAdminLogin"
+  echo "Firewall rule $NODE_EXPORTER_FW already exists. Skipping."
 
-gcloud compute firewall-rules create "$BASTION_SSH_OB_FW_FW" \
-  --project="$PROJECT_ID" \
-  --network="$NETWORK_NAME" \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:22 \
-  --source-tags="$BASTION_VM_TAG" \
-  --target-tags="$OBSERVABILITY_SERVER_TAG"
+else
+
+  gcloud compute firewall-rules create "$NODE_EXPORTER_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --allow=tcp:9100 \
+    --source-tags="$OBSERVABILITY_SERVER_TAG" \
+    --target-tags="$PROXY_VM_TAG"
+
+fi
+
+if gcloud compute firewall-rules describe "$LOKI_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+  echo "Firewall rule $LOKI_FW already exists. Skipping."
+
+else
+
+  gcloud compute firewall-rules create "$LOKI_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:3100 \
+    --source-tags="$PROXY_VM_TAG" \
+    --target-tags="$OBSERVABILITY_SERVER_TAG" \
+    --description="Allow proxy VM to push logs to Loki"
+
+fi
 
 
-echo "======================================="
-echo "Configuring some firewall rules to allow Prometheus, Loki to communicate each other"
-echo "======================================="
-gcloud compute firewall-rules create "$NODE_EXPORTER_FW" \
-  --project="$PROJECT_ID" \
-  --network="$NETWORK_NAME" \
-  --allow=tcp:9100 \
-  --source-tags="$OBSERVABILITY_SERVER_TAG" \
-  --target-tags=$PROXY_VM_TAG
+if gcloud compute firewall-rules describe "$GRAFANA_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
 
-gcloud compute firewall-rules create "$LOKI_FW" \
-  --project="$PROJECT_ID" \
-  --network="$NETWORK_NAME" \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:3100 \
-  --source-tags=$PROXY_VM_TAG \
-  --target-tags="$OBSERVABILITY_SERVER_TAG" \
-  --description="Allow proxy VM to push logs to Loki"
+  echo "Firewall rule $GRAFANA_FW already exists. Skipping."
 
-gcloud compute firewall-rules create "$GRAFANA_FW" \
-  --project="$PROJECT_ID" \
-  --network="$NETWORK_NAME" \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:3000 \
-  --source-ranges=0.0.0.0/0 \
-  --target-tags="$OBSERVABILITY_SERVER_TAG" \
-  --description="Allow Grafana access"
+else
+
+  gcloud compute firewall-rules create "$GRAFANA_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:3000 \
+    --source-ranges=0.0.0.0/0 \
+    --target-tags="$OBSERVABILITY_SERVER_TAG" \
+    --description="Allow Grafana access"
+
+fi
+
+
+if gcloud compute firewall-rules describe "$BACKEND_NODE_EXPORTER_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+  echo "Firewall rule $BACKEND_NODE_EXPORTER_FW already exists. Skipping."
+
+else
+
+  gcloud compute firewall-rules create "$BACKEND_NODE_EXPORTER_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:9100 \
+    --source-tags="$OBSERVABILITY_SERVER_TAG" \
+    --target-tags="$BACKEND_VM_TAG" \
+    --description="Allow Prometheus on Observability VM to scrape Backend Node Exporter"
+
+fi
+
+if gcloud compute firewall-rules describe "$BACKEND_VM_LOKI_FW" \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+
+  echo "Firewall rule $BACKEND_VM_LOKI_FW already exists. Skipping."
+
+else
+
+  gcloud compute firewall-rules create "$BACKEND_VM_LOKI_FW" \
+    --project="$PROJECT_ID" \
+    --network="$NETWORK_NAME" \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:3100 \
+    --source-tags="$BACKEND_VM_TAG" \
+    --target-tags="$OBSERVABILITY_SERVER_TAG" \
+    --description="Allow backend VM to push logs to Loki"
+
+fi
+
+
+
+
+
+
 
 echo "======================================="
 echo "Done"
