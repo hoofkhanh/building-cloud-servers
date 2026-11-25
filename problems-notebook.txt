@@ -139,4 +139,4 @@ sudo sysctl -w net.bridge.bridge-nf-call-iptables=1
 
   **Conclusion:** Bastion traffic successfully reached the Docker container, and the container returned HTTP 200 OK.
 
-- **Overall conclusion:** Both captures confirmed successful connectivity at the VM network interface and Docker bridge. The Docker bridge capture directly verified the complete Bastion-to-container HTTP request/response path.
+- **Overall conclusion:** Both captures confirmed successful connectivity at the VM network interface and Docker bridge. The Docker bridge capture directly verified the complete Bastion-to-container HTTP request/response path
