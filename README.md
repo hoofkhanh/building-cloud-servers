@@ -8,6 +8,10 @@
 
 ![Private access and network security architecture](docs/access-network-architecture.svg)
 
+## 3. Monitoring and centralized logging
+
+![Monitoring and centralized logging architecture](docs/observability-architecture.svg)
+
 ## Start the cloud deployment
 
 The MIG deployment is the closest match to these architectures. From the repository root:
