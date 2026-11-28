@@ -32,6 +32,9 @@ scrape_configs:
         regex: '.*/instanceGroupManagers/proxy-mig'
         action: keep
 
+      - source_labels: [__meta_gce_instance_name]
+        target_label: instance
+
   - job_name: 'app-mig'
     gce_sd_configs:
       - project: building-servers
@@ -46,6 +49,45 @@ scrape_configs:
       - source_labels: [__meta_gce_metadata_created_by]
         regex: '.*/instanceGroupManagers/app-mig'
         action: keep
+
+      - source_labels: [__meta_gce_instance_name]
+        target_label: instance
+
+  - job_name: 'nginx-exporter'
+    gce_sd_configs:
+      - project: building-servers
+        zone: us-central1-a
+        port: 9113
+
+      - project: building-servers
+        zone: us-central1-b
+        port: 9113
+
+    relabel_configs:
+      - source_labels: [__meta_gce_metadata_created_by]
+        regex: '.*/instanceGroupManagers/proxy-mig'
+        action: keep
+
+      - source_labels: [__meta_gce_instance_name]
+        target_label: instance
+    
+  - job_name: 'container-metrics'
+    gce_sd_configs:
+      - project: building-servers
+        zone: us-central1-a
+        port: 8080
+
+      - project: building-servers
+        zone: us-central1-b
+        port: 8080
+
+    relabel_configs:
+      - source_labels: [__meta_gce_metadata_created_by]
+        regex: '.*/instanceGroupManagers/app-mig'
+        action: keep
+
+      - source_labels: [__meta_gce_instance_name]
+        target_label: instance
 EOF
 
 # Docker compose configuration

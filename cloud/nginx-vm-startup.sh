@@ -171,26 +171,6 @@ loki.source.journal "nginx_logs" {
   }
 }
 
-// Discover Docker containers
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
-}
-
-// Collect Docker container logs through Docker API
-loki.source.docker "docker_logs" {
-  host    = "unix:///var/run/docker.sock"
-  targets = discovery.docker.containers.targets
-
-  labels = {
-    job      = "docker",
-    host     = constants.hostname,
-    log_type = "container",
-  }
-
-  forward_to = [loki.write.loki.receiver]
-}
-
-
 loki.write "loki" {
   endpoint {
     url = "http://${OBSERVABILITY_INTERNAL_IP}:3100/loki/api/v1/push"
@@ -198,8 +178,54 @@ loki.write "loki" {
 }
 EOF
 
-sudo usermod -aG alloydocker 
-sudo systemctl restart alloy
 
 sudo alloy validate /etc/alloy/config.alloy
 sudo systemctl start alloy
+
+# Configuring Nginx Prometheus Exporter
+sudo tee /etc/nginx/conf.d/monitoring.conf > /dev/null <<EOF
+server {
+    listen 127.0.0.1:8080;
+    server_name localhost;
+
+    location /stub_status {
+        stub_status;
+    }
+}
+EOF
+
+sudo systemctl reload nginx
+
+sudo useradd \
+  --no-create-home \
+  --shell /usr/sbin/nologin \
+  nginx-exporter
+
+cd /tmp
+wget https://github.com/nginx/nginx-prometheus-exporter/releases/download/v1.5.3/nginx-prometheus-exporter_1.5.3_linux_amd64.tar.gz
+tar -xvf nginx-prometheus-exporter_1.5.3_linux_amd64.tar.gz
+sudo mv nginx-prometheus-exporter /usr/local/bin/
+sudo chown nginx-exporter:nginx-exporter /usr/local/bin/nginx-prometheus-exporter
+
+sudo tee /etc/systemd/system/nginx-exporter.service > /dev/null <<EOF
+[Unit]
+Description=NGINX Prometheus Exporter
+After=network.target nginx.service
+
+[Service]
+User=nginx-exporter
+Group=nginx-exporter
+
+ExecStart=/usr/local/bin/nginx-prometheus-exporter \
+    --nginx.scrape-uri=http://127.0.0.1:8080/stub_status \
+    --web.listen-address=0.0.0.0:9113
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl start nginx-exporter

@@ -109,6 +109,8 @@ LOKI_FW="allow-proxy-vm-to-loki"
 GRAFANA_FW="allow-grafana-3000"
 BACKEND_VM_LOKI_FW="allow-backend-vm-to-loki"
 BACKEND_NODE_EXPORTER_FW="allow-prometheus-node-exporter-backend-vm"
+NGINX_PROMETHEUS_EXPORTER_FW="allow-prometheus-get-nginx-exporter-fw"
+CADVISOR_CONTAINER_METRICS_FW="allow-prometheus-retrieve-container-metrics"
 
 # =========================================================
 # CLOUD BUILD / ARTIFACT REGISTRY
@@ -342,6 +344,8 @@ FIREWALL_RULES=(
     "$GRAFANA_FW"
     "$BACKEND_NODE_EXPORTER_FW"
     "$BACKEND_VM_LOKI_FW"
+    "$NGINX_PROMETHEUS_EXPORTER_FW"
+    "$CADVISOR_CONTAINER_METRICS_FW"
 )
 
 for FW in "${FIREWALL_RULES[@]}"; do

@@ -145,6 +145,16 @@ discovery.docker "containers" {
   host = "unix:///var/run/docker.sock"
 }
 
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
 // Collect Docker container logs through Docker API
 loki.source.docker "docker_logs" {
   host    = "unix:///var/run/docker.sock"
@@ -155,6 +165,8 @@ loki.source.docker "docker_logs" {
     host     = constants.hostname,
     log_type = "container",
   }
+
+  relabel_rules = discovery.relabel.docker_logs.rules
 
   forward_to = [loki.write.loki.receiver]
 }
@@ -168,7 +180,19 @@ loki.write "loki" {
 EOF
 
 sudo usermod -aG docker alloy
-sudo systemctl restart alloy
 
 sudo alloy validate /etc/alloy/config.alloy
 sudo systemctl start alloy
+
+# Configuring cAdvisor to get metrics from containers exported to Prometheus
+sudo docker run -d \
+  --name cadvisor \
+  --restart unless-stopped \
+  --privileged \
+  -p 8080:8080 \
+  -v /:/rootfs:ro \
+  -v /var/run:/var/run:ro \
+  -v /sys:/sys:ro \
+  -v /var/lib/docker:/var/lib/docker:ro \
+  -v /dev/disk:/dev/disk:ro \
+  gcr.io/cadvisor/cadvisor:latest

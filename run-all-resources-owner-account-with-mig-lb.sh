@@ -77,6 +77,9 @@ GRAFANA_FW="allow-grafana-3000"
 BACKEND_VM_LOKI_FW="allow-backend-vm-to-loki"
 BACKEND_NODE_EXPORTER_FW="allow-prometheus-node-exporter-backend-vm"
 
+NGINX_PROMETHEUS_EXPORTER_FW="allow-prometheus-get-nginx-exporter-fw"
+CADVISOR_CONTAINER_METRICS_FW="allow-prometheus-retrieve-container-metrics"
+
 gcloud services enable \
   compute.googleapis.com \
   iam.googleapis.com \
@@ -1057,11 +1060,29 @@ else
 
 fi
 
+if ! gcloud compute firewall-rules describe $NGINX_PROMETHEUS_EXPORTER_FW \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $NGINX_PROMETHEUS_EXPORTER_FW \
+        --project=$PROJECT_ID \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:9113 \
+        --source-tags=$OBSERVABILITY_SERVER_TAG \
+        --target-tags=$PROXY_VM_TAG
+fi
 
-
-
-
-
+if ! gcloud compute firewall-rules describe $CADVISOR_CONTAINER_METRICS_FW \
+  --project="$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud compute firewall-rules create $CADVISOR_CONTAINER_METRICS_FW \
+        --project=$PROJECT_ID \
+        --network=$NETWORK_NAME \
+        --direction=INGRESS \
+        --action=ALLOW \
+        --rules=tcp:8080 \
+        --source-tags=$OBSERVABILITY_SERVER_TAG \
+        --target-tags=$BACKEND_VM_TAG
+fi
 
 echo "======================================="
 echo "Done"
